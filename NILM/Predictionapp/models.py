@@ -70,3 +70,15 @@ class Predictions(Model):
         unique_together = ('aggregate','appliance')
 
         ordering = ['appliance']
+
+    @property
+    def Date_Time(self):
+        return self.aggregate.Date_Time
+
+    @property
+    def appliance_name(self):
+        return self.appliance.appliance_Name
+
+    @property
+    def appliance_id(self):
+        return self.appliance.appliance_ID
