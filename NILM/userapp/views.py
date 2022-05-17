@@ -1,4 +1,3 @@
-from django.shortcuts import render
 from django.http import JsonResponse
 from django.contrib.auth.models import User
 
@@ -35,8 +34,5 @@ def authenticate(request):
     except User.DoesNotExist:
         return JsonResponse(False, status = status.HTTP_401_UNAUTHORIZED)
     return JsonResponse(intended_user.check_password(request_user.password))
-
-
-    
 
 # Create your views here.
