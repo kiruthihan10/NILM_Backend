@@ -16,4 +16,4 @@ class AggregateSerializer(serializers.ModelSerializer):
 
 class PredictionSerializer(serializers.ModelSerializer):
     model = Predictions
-    fields = ['Prediction_ID', 'Date_Time', 'appliance_name', 'appliance_id', 'prediction', 'completed']
+    fields = ['Prediction_ID', 'Date_Time', 'appliance_name', 'id_appliance', 'prediction', 'completed']

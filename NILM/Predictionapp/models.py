@@ -5,7 +5,7 @@ from django.db.models import AutoField, TextField, FloatField, ForeignKey, DateT
 from django.contrib.auth.models import User
 
 class House(Model):
-    user = OneToOneField(User, primary_key=True)
+    user = OneToOneField(User, primary_key=True, on_delete=CASCADE)
     Mean = FloatField(default=0)
     Std = FloatField(default=0)
 
@@ -24,6 +24,8 @@ class Appliance(Model):
     house = ForeignKey(House, on_delete=CASCADE)
     mean = FloatField(default=0)
     std = FloatField(default=1)
+    middle_layers_activation = TextField(default='relu')
+    power_on_z_score = FloatField(default=0)
 
     class Meta:
         indexes = [
@@ -31,7 +33,7 @@ class Appliance(Model):
             Index(fields=['house', 'appliance_Name'])
         ]
 
-        unique_together = ('appliance_ID', 'house')
+        unique_together = ['appliance_ID', 'house']
 
     @property
     def username(self):
@@ -49,7 +51,7 @@ class Aggregate(Model):
             Index(fields=['house', 'Date_Time'])
         ]
 
-        unique_together = ('house, Date_Time')
+        unique_together = ['house', 'Date_Time']
 
         ordering = ['-Date_Time']
 
@@ -67,7 +69,7 @@ class Predictions(Model):
             Index(fields = ['aggregate', 'appliance'])
         ]
 
-        unique_together = ('aggregate','appliance')
+        unique_together = ['aggregate','appliance']
 
         ordering = ['appliance']
 
@@ -80,5 +82,5 @@ class Predictions(Model):
         return self.appliance.appliance_Name
 
     @property
-    def appliance_id(self):
+    def id_appliance(self):
         return self.appliance.appliance_ID

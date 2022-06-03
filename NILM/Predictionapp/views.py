@@ -10,8 +10,18 @@ from rest_framework.permissions import IsAuthenticated
 
 import datetime
 
+import os
+
 from .serializers import *
 from .models import *
+from .model_maker import wavenet_maker
+
+HOLD_TIME = 10
+
+def get_current_address():
+    return os.getcwd()
+
+
 
 def building_get(request):
     try:
@@ -101,9 +111,43 @@ def aggregate_between(request, house):
         end = datetime.datetime.now()
     return Aggregate.objects.filter(hosue = house, Date_Time__range = (start, end))
 
+def appliance_predict_check(prediction)->bool:
+    non_finished = filter(finished = False)
+    return len(non_finished) // HOLD_TIME == 0
+
+def confirm_count(aggregate) -> int:
+    return max(len(aggregate) - 3**6 + 1, 0)
+
+def appliance_predict(aggregate):
+    appliances = Appliance.objects.filter(house = aggregate.house)
+    for appliance in appliances:
+        predictions = Predictions.objects.filter(aggregate = aggregate, appliance = appliance)
+        if appliance_predict_check(predictions):
+            model = wavenet_maker(
+                middle_layers_activation = appliance.middle_layers_activation,
+                power_on_z_score = appliance.power_on_z_score)
+            model.load_weights(f'{get_current_address()}/NILM/Predictionapp/DL/{appliance.username}/{appliance.appliance_name}.h5')
+            new_predictions = model.predict(list(aggregate.Power_Consumption))
+            for new_prediction in new_predictions[:confirm_count(aggregate)]:
+                prediction_instance = Predictions(
+                    appliance = appliance,
+                    aggregate = aggregate,
+                    prediction = new_prediction,
+                    completed = True
+                )
+                prediction_instance.save()
+            for new_prediction in new_predictions[confirm_count(aggregate):]:
+                prediction_instance = Predictions(
+                    appliance = appliance,
+                    aggregate = aggregate,
+                    prediction = new_prediction
+                )
+                prediction_instance.save()
+
 def aggregate_get(request, house):
     aggregate_instances = aggregate_between(request, house)
     serializers = AggregateSerializer(aggregate_instances)
+    appliance_predict(aggregate_instances)
     return JsonResponse(serializers.data, status=status.HTTP_201_CREATED)
 
 def aggregate_post(request, house):
@@ -130,10 +174,10 @@ def prediction_get(request, house):
         predictions = Predictions.objects.filter(aggregate = instance)
         for prediction in predictions:
             prediction_data = PredictionSerializer(prediction).data
-            if prediction.appliance in predictions_dict:
-                predictions_dict[prediction.appliance.appliance_ID].append(prediction_data)
+            if appliance in predictions_dict:
+                predictions_dict[appliance.appliance_ID].append(prediction_data)
             else:
-                predictions_dict[prediction.appliance.appliance_ID] = [prediction_data]
+                predictions_dict[appliance.appliance_ID] = [prediction_data]
     return JsonResponse(predictions_dict, status = status.HTTP_200_OK)
 
 @api_view(['GET'])
