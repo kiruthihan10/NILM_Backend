@@ -1,3 +1,6 @@
+import tensorflow as tf
+from tensorflow import keras
+
 class wavenet_Unit(tf.keras.layers.Layer):
     def __init__(self, out_channels, kernel_size, dilation_rate, causal=True, residual = True, **kwargs):
         super(wavenet_Unit, self).__init__(**kwargs)
@@ -70,35 +73,35 @@ class wavenet_maker:
         
     def make(self):
         mirrored_strategy = tf.distribute.MirroredStrategy()
-        if dilation_size is None:
-            dilation_size = kernel_size
+        if self.dilation_size is None:
+            self.dilation_size = self.kernel_size
         with mirrored_strategy.scope():
 
             aggregate_input = tf.keras.Input((None,3),name='aggregate_input')
             
             ## Regression Model is a wevenet model but without Causal Padding nor SE; The Last layer activations is relut to limit the ouput to positive.
             regression_model = wavenet(
-                n_layers = n_layers,
-                kernel_size = kernel_size,
-                dialtion_base = dilation_size,
-                out_channels = depth,
+                n_layers = self.n_layers,
+                kernel_size = self.kernel_size,
+                dialtion_base = self.dilation_size,
+                out_channels = self.depth,
                 causal = False,
                 base_activation = 'relu',
-                middle_layers_activation = middle_layers_activation,
+                middle_layers_activation = self.middle_layers_activation,
                 name = 'regression_model')
 
             ## Classification Model is a wavenet model but without Causal Padding nor SE; The last layer activation is sigmoid to get binary probabilistic output.
             classification_model = wavenet(        
-                n_layers = n_layers,
-                kernel_size = kernel_size,
-                dialtion_base = dilation_size,
-                out_channels = depth,
+                n_layers = self.n_layers,
+                kernel_size = self.kernel_size,
+                dialtion_base = self.dilation_size,
+                out_channels = self.depth,
                 causal = False,
                 base_activation = 'sigmoid',
-                middle_layers_activation = middle_layers_activation,
+                middle_layers_activation = self.middle_layers_activation,
                 name = 'classification_model')
 
-            ONOFF = classification_model(keras.layers.Dense(depth)(aggregate_input))
+            ONOFF = classification_model(keras.layers.Dense(self.depth)(aggregate_input))
 
 
             ## The Classification output is concatenated with initial aggregate input to be feeded to regression model
@@ -108,20 +111,11 @@ class wavenet_maker:
             ## Small model to increase the dimmension of the regression input
 
             power_input = keras.Sequential([
-                                            keras.layers.Conv1D(depth//2, 2, padding='same'),
-                                            keras.layers.Conv1D(depth, 2, padding='same')
+                                            keras.layers.Conv1D(self.depth//2, 2, padding='same'),
+                                            keras.layers.Conv1D(self.depth, 2, padding='same')
             ], name='Depth_Increase')(power_input)
 
             power = regression_model(power_input)
-
-            optimizer = tf.keras.optimizers.Nadam(initial_lr, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
             # optimizer = tf.keras.optimizers.SGD(0.1)
             main_model = tf.keras.Model(inputs=aggregate_input,outputs=[power,ONOFF])
-
-            main_model.compile(
-                optimizer,
-                ['mse',keras.losses.BinaryCrossentropy()],
-                metrics={
-                    'classification_model':'acc',
-                })
             return main_model

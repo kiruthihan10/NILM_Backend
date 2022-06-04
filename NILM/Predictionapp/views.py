@@ -9,8 +9,8 @@ from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 import datetime
-
 import os
+import numpy as np
 
 from .serializers import *
 from .models import *
@@ -18,9 +18,23 @@ from .model_maker import wavenet_maker
 
 HOLD_TIME = 10
 
-def get_current_address():
-    return os.getcwd()
+def load_all_models_for_demo():
+    def get_current_address():
+        return os.getcwd()
+    def dl_model_load(appliance):
+        model = wavenet_maker(
+            middle_layers_activation = appliance.middle_layers_activation,
+            power_on_z_score = appliance.power_on_z_score).make()
+        model.load_weights(f'{get_current_address()}\\Predictionapp\\DL\\{appliance.username}\\{appliance.appliance_Name}.h5')
+        return model
+    def load_dl_models_by_string(appliance_name):
+        appliance = Appliance.objects.get(appliance_Name = appliance_name)
+        return dl_model_load(appliance)
+    names = Appliance.objects.all().values_list('appliance_Name', flat = True)
+    return {name: load_dl_models_by_string(name) for name in names}
 
+dl_models = load_all_models_for_demo()
+print(dl_models)
 
 
 def building_get(request):
@@ -118,16 +132,17 @@ def appliance_predict_check(prediction)->bool:
 def confirm_count(aggregate) -> int:
     return max(len(aggregate) - 3**6 + 1, 0)
 
+
+
+
 def appliance_predict(aggregate):
     appliances = Appliance.objects.filter(house = aggregate.house)
     for appliance in appliances:
         predictions = Predictions.objects.filter(aggregate = aggregate, appliance = appliance)
         if appliance_predict_check(predictions):
-            model = wavenet_maker(
-                middle_layers_activation = appliance.middle_layers_activation,
-                power_on_z_score = appliance.power_on_z_score)
-            model.load_weights(f'{get_current_address()}/NILM/Predictionapp/DL/{appliance.username}/{appliance.appliance_name}.h5')
-            new_predictions = model.predict(list(aggregate.Power_Consumption))
+            model = dl_models[appliance.appliance_Name]
+            new_predictions = model.predict((np.array(aggregate.Power_Consumption)-aggregate.house.mean)/aggregate.house.std)
+            new_predictions *= appliance.std
             for new_prediction in new_predictions[:confirm_count(aggregate)]:
                 prediction_instance = Predictions(
                     appliance = appliance,
@@ -136,6 +151,8 @@ def appliance_predict(aggregate):
                     completed = True
                 )
                 prediction_instance.save()
+            new_predictions += np.array(predictions.values_list('prediction', flat = True))
+            new_predictions /= 2
             for new_prediction in new_predictions[confirm_count(aggregate):]:
                 prediction_instance = Predictions(
                     appliance = appliance,
@@ -198,7 +215,6 @@ def appliance_prediction_get(request, house, appliance):
     serializer = PredictionSerializer(predictions)
     return JsonResponse(serializer.data, status = status.HTTP_200_OK)
 
-
 @api_view(['GET'])
 @permission_classes((IsAuthenticated,))      
 def appliance_predictions(request, appliance):
@@ -206,3 +222,12 @@ def appliance_predictions(request, appliance):
     if request.method == 'GET':
         return appliance_prediction_get(request, house, appliance)
     return JsonResponse({'Error':'Wrong Request Method'}, status = status.HTTP_400_BAD_REQUEST)
+
+
+def test(request):
+    import numpy as np
+    appliance = Appliance.objects.all()[0]
+    # model = dl_model_load(appliance)
+    print(model)
+    prediction = model.predict(np.random.normal(size=(1,10000,3)))
+    return JsonResponse({'None':tuple(prediction[0].tolist())}, status = status.HTTP_200_OK)
