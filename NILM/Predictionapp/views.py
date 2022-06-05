@@ -9,7 +9,6 @@ from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated
 
 import datetime
-import os
 import numpy as np
 
 from .serializers import *
@@ -19,23 +18,15 @@ from .model_maker import wavenet_maker
 HOLD_TIME = 10
 
 def load_all_models_for_demo():
-    def get_current_address():
-        return os.getcwd()
-    def dl_model_load(appliance):
-        model = wavenet_maker(
-            middle_layers_activation = appliance.middle_layers_activation,
-            power_on_z_score = appliance.power_on_z_score).make()
-        model.load_weights(f'{get_current_address()}\\Predictionapp\\DL\\{appliance.username}\\{appliance.appliance_Name}.h5')
-        return model
+
     def load_dl_models_by_string(appliance_name):
         appliance = Appliance.objects.get(appliance_Name = appliance_name)
-        return dl_model_load(appliance)
+        return wavenet_maker(middle_layers_activation=appliance.middle_layers_activation, power_on_z_score=appliance.power_on_z_score).make(appliance)
+    
     names = Appliance.objects.all().values_list('appliance_Name', flat = True)
     return {name: load_dl_models_by_string(name) for name in names}
 
 dl_models = load_all_models_for_demo()
-print(dl_models)
-
 
 def building_get(request):
     try:
@@ -125,41 +116,56 @@ def aggregate_between(request, house):
         end = datetime.datetime.now()
     return Aggregate.objects.filter(hosue = house, Date_Time__range = (start, end))
 
-def appliance_predict_check(prediction)->bool:
-    non_finished = filter(finished = False)
-    return len(non_finished) // HOLD_TIME == 0
+def predict_check(aggregate)->bool:
+    return (aggregate.count() % HOLD_TIME == 0) and (aggregate.count() != 0)
 
 def confirm_count(aggregate) -> int:
     return max(len(aggregate) - 3**6 + 1, 0)
 
-
-
-
-def appliance_predict(aggregate):
-    appliances = Appliance.objects.filter(house = aggregate.house)
+def appliance_predict(house:House):
+    aggregate = Aggregate.objects.filter(house = house).order_by('-Date_Time')
+    if not predict_check(aggregate):
+        return
+    appliances = Appliance.objects.filter(house = house)
     for appliance in appliances:
-        predictions = Predictions.objects.filter(aggregate = aggregate, appliance = appliance)
-        if appliance_predict_check(predictions):
-            model = dl_models[appliance.appliance_Name]
-            new_predictions = model.predict((np.array(aggregate.Power_Consumption)-aggregate.house.mean)/aggregate.house.std)
-            new_predictions *= appliance.std
-            for new_prediction in new_predictions[:confirm_count(aggregate)]:
+        model = dl_models[appliance.appliance_Name]
+        Power_Consumption = np.array([
+            np.array(aggregate.values_list('Power_Consumption_phase_1')),
+            np.array(aggregate.values_list('Power_Consumption_phase_2')),
+            np.array(aggregate.values_list('Power_Consumption_phase_3'))
+            ])
+        Power_Consumption = Power_Consumption.reshape(1,len(aggregate),3)
+        new_predictions = np.squeeze(np.array(model((np.array(Power_Consumption)-house.Mean)/house.Std)))[0,:]
+        new_predictions *= appliance.std
+        print(new_predictions.shape)
+        print(confirm_count(aggregate))
+        for new_prediction in new_predictions[:confirm_count(aggregate)]:
+            prediction_instance = Predictions(
+                Prediction_ID = Predictions.objects.get(appliance = appliance, aggregate = aggregate),
+                appliance = appliance,
+                aggregate = aggregate,
+                prediction = new_prediction,
+                completed = True
+            )
+            prediction_instance.save()
+        # new_predictions += np.array(predictions.values_list('prediction', flat = True))
+        # new_predictions /= 2
+        for i,new_prediction in enumerate(new_predictions[confirm_count(aggregate):]):
+            prediction_id = Predictions.objects.filter(appliance = appliance, aggregate = aggregate[i])
+            if len(prediction_id) != 0:
                 prediction_instance = Predictions(
+                    Prediction_ID = prediction_id[0].Prediction_ID,
                     appliance = appliance,
-                    aggregate = aggregate,
-                    prediction = new_prediction,
-                    completed = True
-                )
-                prediction_instance.save()
-            new_predictions += np.array(predictions.values_list('prediction', flat = True))
-            new_predictions /= 2
-            for new_prediction in new_predictions[confirm_count(aggregate):]:
-                prediction_instance = Predictions(
-                    appliance = appliance,
-                    aggregate = aggregate,
+                    aggregate = aggregate[i],
                     prediction = new_prediction
                 )
-                prediction_instance.save()
+            else:
+                prediction_instance = Predictions(
+                    appliance = appliance,
+                    aggregate = aggregate[i],
+                    prediction = new_prediction
+                )
+            prediction_instance.save()
 
 def aggregate_get(request, house):
     aggregate_instances = aggregate_between(request, house)
@@ -169,9 +175,14 @@ def aggregate_get(request, house):
 
 def aggregate_post(request, house):
     data = request.POST
-    aggregate_instance = Aggregate(house = house, Power_Consumption = data.get('Power_Consumption'))
+    aggregate_instance = Aggregate(
+        house = house,
+        Power_Consumption_phase_1 = data.get('Power_Consumption_phase_1'),
+        Power_Consumption_phase_2 = data.get('Power_Consumption_phase_2'),
+        Power_Consumption_phase_3 = data.get('Power_Consumption_phase_3'))
     aggregate_instance.save()
-    serializer = AggregateSerializer(aggregate_instance)
+    appliance_predict(house)
+    serializer = AggregateSerializer(instance = aggregate_instance)
     return JsonResponse(serializer.data, status=status.HTTP_201_CREATED)
     
 @api_view(['GET','POST'])

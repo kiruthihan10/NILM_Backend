@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
+import os
 
 class wavenet_Unit(tf.keras.layers.Layer):
     def __init__(self, out_channels, kernel_size, dilation_rate, causal=True, residual = True, **kwargs):
@@ -71,7 +72,10 @@ class wavenet_maker:
         self.middle_layers_activation = middle_layers_activation
         self.power_on_z_score = power_on_z_score
         
-    def make(self):
+    def get_current_address(self):
+        return os.getcwd()
+    
+    def make(self, appliance):
         mirrored_strategy = tf.distribute.MirroredStrategy()
         if self.dilation_size is None:
             self.dilation_size = self.kernel_size
@@ -118,4 +122,5 @@ class wavenet_maker:
             power = regression_model(power_input)
             # optimizer = tf.keras.optimizers.SGD(0.1)
             main_model = tf.keras.Model(inputs=aggregate_input,outputs=[power,ONOFF])
-            return main_model
+            main_model.load_weights(f'{self.get_current_address()}\\Predictionapp\\DL\\{appliance.username}\\{appliance.appliance_Name}.h5')
+            return tf.function(main_model)

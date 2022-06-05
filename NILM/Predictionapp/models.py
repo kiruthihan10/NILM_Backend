@@ -43,7 +43,9 @@ class Aggregate(Model):
     Record_ID = AutoField(primary_key=True, unique=True)
     Date_Time = DateTimeField(auto_now_add = True)
     house = ForeignKey(House, on_delete=CASCADE)
-    Power_Consumption = FloatField(default=0)
+    Power_Consumption_phase_1 = FloatField(default=0)
+    Power_Consumption_phase_2 = FloatField(default=0)
+    Power_Consumption_phase_3 = FloatField(default=0)
 
     class Meta:
         indexes = [
