@@ -23,16 +23,22 @@ def user(request):
             return JsonResponse({'Error':'Bad  Request'},status=status.HTTP_400_BAD_REQUEST)
     else:
         return JsonResponse({'Error':'Bad  Request Method'},status=status.HTTP_400_BAD_REQUEST)
-    seralizer = UsernameSerializer(instance = user)
-    return JsonResponse(seralizer.data, status=response_status)
+    return JsonResponse(
+        {'users':[UsernameSerializer(instance = instance).data for instance in user]},
+        status=response_status)
 
 @api_view(['GET'])
 def authenticate(request):
-    request_user = request.user
+    data = request.GET
+    print(data)
+    uname = data.get('uname')
+    pw = data.get('pw')
+    print(uname)
     try:
-        intended_user = User.objects.get(username = request_user.username)
+        intended_user = User.objects.get(username = uname)
+        return JsonResponse({'result':intended_user.check_password(pw)})
     except User.DoesNotExist:
-        return JsonResponse(False, status = status.HTTP_401_UNAUTHORIZED)
-    return JsonResponse(intended_user.check_password(request_user.password))
+        return JsonResponse({'result':False}, status = status.HTTP_401_UNAUTHORIZED)
+
 
 # Create your views here.

@@ -127,15 +127,18 @@ def appliance_predict(house:House):
     if not predict_check(aggregate):
         return
     appliances = Appliance.objects.filter(house = house)
+    Power_Consumption = np.array([
+        np.array(aggregate.values_list('Power_Consumption_phase_1')),
+        np.array(aggregate.values_list('Power_Consumption_phase_2')),
+        np.array(aggregate.values_list('Power_Consumption_phase_3'))
+        ])
+    Power_Consumption = Power_Consumption.reshape(1,len(aggregate),3)
     for appliance in appliances:
+        n_done = Predictions.objects.filter(appliance = appliance, completed = True).count()
+        aggregate_size = len(aggregate)
+        fed_size = aggregate_size-n_done
         model = dl_models[appliance.appliance_Name]
-        Power_Consumption = np.array([
-            np.array(aggregate.values_list('Power_Consumption_phase_1')),
-            np.array(aggregate.values_list('Power_Consumption_phase_2')),
-            np.array(aggregate.values_list('Power_Consumption_phase_3'))
-            ])
-        Power_Consumption = Power_Consumption.reshape(1,len(aggregate),3)
-        new_predictions = np.squeeze(np.array(model((np.array(Power_Consumption)-house.Mean)/house.Std)))[0,:]
+        new_predictions = np.squeeze(np.array(model((np.array(Power_Consumption[:,-fed_size:,:])-house.Mean)/house.Std)))[0,:]
         new_predictions *= appliance.std
         print(new_predictions.shape)
         print(confirm_count(aggregate))
@@ -150,7 +153,8 @@ def appliance_predict(house:House):
             prediction_instance.save()
         # new_predictions += np.array(predictions.values_list('prediction', flat = True))
         # new_predictions /= 2
-        for i,new_prediction in enumerate(new_predictions[confirm_count(aggregate):]):
+        n_already_done = Predictions.objects.filter(appliance = appliance, completed = True).count()
+        for i,new_prediction in enumerate(new_predictions[confirm_count(aggregate)-n_already_done:]):
             prediction_id = Predictions.objects.filter(appliance = appliance, aggregate = aggregate[i])
             if len(prediction_id) != 0:
                 prediction_instance = Predictions(
